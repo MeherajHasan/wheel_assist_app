@@ -1,5 +1,6 @@
 import 'dart:async';
 import 'dart:convert';
+import 'package:flutter/material.dart';
 import 'package:flutter_blue_plus/flutter_blue_plus.dart';
 import 'package:wheel_assist/constants/ble_constants.dart';
 import 'package:wheel_assist/models/car_state.dart';
@@ -20,13 +21,20 @@ class BleService {
   // SCAN AND CONNECT
   //////////////////////////////////////////////////
 
+  bool _isConnecting = false;
   Future<void> startScan() async {
+    _isConnecting = false;
+
     await FlutterBluePlus.startScan(timeout: const Duration(seconds: 10));
 
     _scanSub = FlutterBluePlus.scanResults.listen((results) async {
       for (ScanResult r in results) {
-        if (r.device.platformName == BleConstants.deviceName) {
+        print('FOUND: ${r.device.platformName} | ${r.device.remoteId}');
+        if (r.device.platformName == BleConstants.deviceName &&
+            !_isConnecting) {
+          _isConnecting = true;
           await FlutterBluePlus.stopScan();
+          await _scanSub?.cancel();
           await _connect(r.device);
           break;
         }
@@ -34,35 +42,58 @@ class BleService {
     });
   }
 
+  //////////////////////////////////////////////////
+  // CONNECT
+  //////////////////////////////////////////////////
+
   Future<void> _connect(BluetoothDevice device) async {
-    _device = device;
-    await device.connect(autoConnect: false, license: License.free);
+    try {
+      _device = device;
+      print('Connecting to ${device.platformName}');
 
-    device.connectionState.listen((state) {
-      if (state == BluetoothConnectionState.disconnected) {
-        carState.setConnected(false);
-        carState.setMode(0);
-      }
-    });
+      await device.connect(autoConnect: false, license: License.free);
+      print('Connected — discovering services');
 
-    List<BluetoothService> services = await device.discoverServices();
+      device.connectionState.listen((state) {
+        print('Connection state: $state');
+        if (state == BluetoothConnectionState.disconnected) {
+          carState.setConnected(false);
+          carState.setMode(0);
+        }
+      });
 
-    for (BluetoothService s in services) {
-      if (s.uuid.toString() == BleConstants.serviceUuid) {
+      await Future.delayed(const Duration(seconds: 1));
+
+      List<BluetoothService> services = await device.discoverServices();
+      print('Services found: ${services.length}');
+
+      for (BluetoothService s in services) {
+        print('SERVICE: ${s.uuid.toString()}');
         for (BluetoothCharacteristic c in s.characteristics) {
+          print('  CHAR: ${c.uuid.toString()}');
+
           if (c.uuid.toString() == BleConstants.rxCharUuid) {
             _rxChar = c;
+            print('  RX CHAR FOUND');
           }
           if (c.uuid.toString() == BleConstants.txCharUuid) {
             _txChar = c;
             await c.setNotifyValue(true);
             _feedbackSub = c.onValueReceived.listen(_onFeedback);
+            print('  TX CHAR FOUND');
           }
         }
       }
-    }
 
-    carState.setConnected(true);
+      if (_rxChar != null && _txChar != null) {
+        print('ALL CHARS FOUND — setting connected');
+        carState.setConnected(true);
+      } else {
+        print('CHARS NOT FOUND — rxChar: $_rxChar  txChar: $_txChar');
+      }
+    } catch (e) {
+      print('CONNECT ERROR: $e');
+    }
   }
 
   //////////////////////////////////////////////////
@@ -79,7 +110,7 @@ class BleService {
         mode: json['mode'] as int,
       );
     } catch (e) {
-      // ignore malformed packets
+      print('FEEDBACK ERROR: $e');
     }
   }
 
@@ -123,5 +154,7 @@ class BleService {
     _rxChar = null;
     _txChar = null;
     _device = null;
+    carState.setConnected(false);
+    carState.setMode(0);
   }
 }

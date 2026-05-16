@@ -11,6 +11,8 @@ class BleConstants {
   // ESP32 sends feedback to this
   static const String txCharUuid = '12345678-1234-1234-1234-123456789abe';
 
+  static const String deviceMac = '00:70:07:7e:6b:fc';
+
   // Commands
   static const int cmdStop = 0;
   static const int cmdForward = 1;

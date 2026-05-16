@@ -22,8 +22,22 @@ class CarState extends ChangeNotifier {
   double gyroX = 0.0;
   double gyroY = 0.0;
 
+  bool isScanning = false;
+  bool isConnecting = false;
+
+  void setScanning(bool val) {
+    isScanning = val;
+    notifyListeners();
+  }
+
+  void setConnecting(bool val) {
+    isConnecting = val;
+    notifyListeners();
+  }
+
   void setConnected(bool val) {
     isConnected = val;
+    print('setConnected called: $val');
     notifyListeners();
   }
 
