@@ -25,6 +25,20 @@ class CarState extends ChangeNotifier {
   bool isScanning = false;
   bool isConnecting = false;
 
+  // voice
+  bool isVoiceMode = false;
+  String lastWord = '';
+
+  void setVoiceMode(bool val) {
+    isVoiceMode = val;
+    notifyListeners();
+  }
+
+  void setLastWord(String val) {
+    lastWord = val;
+    notifyListeners();
+  }
+
   void setScanning(bool val) {
     isScanning = val;
     notifyListeners();

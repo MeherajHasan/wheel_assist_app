@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import 'package:wheel_assist/models/car_state.dart';
 import 'package:wheel_assist/services/ble_service.dart';
+import 'package:wheel_assist/services/voice_service.dart';
 import 'package:wheel_assist/widgets/status_bar.dart';
 import 'package:wheel_assist/widgets/mode_toggle.dart';
 import 'package:wheel_assist/widgets/speed_slider.dart';
@@ -9,8 +10,13 @@ import 'package:wheel_assist/widgets/control_pad.dart';
 
 class HomeScreen extends StatelessWidget {
   final BleService bleService;
+  final VoiceService voiceService;
 
-  const HomeScreen({super.key, required this.bleService});
+  const HomeScreen({
+    super.key,
+    required this.bleService,
+    required this.voiceService,
+  });
 
   @override
   Widget build(BuildContext context) {
@@ -30,33 +36,55 @@ class HomeScreen extends StatelessWidget {
           ),
         ),
         actions: [
-          // connect / disconnect button
           Padding(
             padding: const EdgeInsets.only(right: 16),
-            child: TextButton.icon(
-              onPressed: () async {
-                if (state.isConnected) {
-                  await bleService.disconnect();
-                } else {
-                  await bleService.startScan();
-                }
-              },
-              icon: Icon(
-                state.isConnected ? Icons.bluetooth_connected : Icons.bluetooth,
-                color: state.isConnected
-                    ? Colors.greenAccent
-                    : Colors.deepOrange,
-              ),
-              label: Text(
-                state.isConnected ? 'Disconnect' : 'Connect',
-                style: TextStyle(
-                  color: state.isConnected
-                      ? Colors.greenAccent
-                      : Colors.deepOrange,
-                  fontWeight: FontWeight.bold,
-                ),
-              ),
-            ),
+            child: state.isScanning || state.isConnecting
+                ? Row(
+                    children: [
+                      const SizedBox(
+                        width: 16,
+                        height: 16,
+                        child: CircularProgressIndicator(
+                          strokeWidth: 2,
+                          color: Colors.deepOrange,
+                        ),
+                      ),
+                      const SizedBox(width: 8),
+                      Text(
+                        state.isScanning ? 'Scanning...' : 'Connecting...',
+                        style: const TextStyle(
+                          color: Colors.deepOrange,
+                          fontWeight: FontWeight.bold,
+                        ),
+                      ),
+                    ],
+                  )
+                : TextButton.icon(
+                    onPressed: () async {
+                      if (state.isConnected) {
+                        await bleService.disconnect();
+                      } else {
+                        await bleService.startScan();
+                      }
+                    },
+                    icon: Icon(
+                      state.isConnected
+                          ? Icons.bluetooth_connected
+                          : Icons.bluetooth,
+                      color: state.isConnected
+                          ? Colors.greenAccent
+                          : Colors.deepOrange,
+                    ),
+                    label: Text(
+                      state.isConnected ? 'Disconnect' : 'Connect',
+                      style: TextStyle(
+                        color: state.isConnected
+                            ? Colors.greenAccent
+                            : Colors.deepOrange,
+                        fontWeight: FontWeight.bold,
+                      ),
+                    ),
+                  ),
           ),
         ],
       ),
@@ -72,11 +100,72 @@ class HomeScreen extends StatelessWidget {
 
                 // MODE TOGGLE
                 ModeToggle(bleService: bleService),
-                const SizedBox(height: 32),
+                const SizedBox(height: 24),
 
-                // CONTROL PAD
-                ControlPad(bleService: bleService),
-                const SizedBox(height: 32),
+                // VOICE MODE — only in app mode
+                if (state.isConnected && state.mode == 1) ...[
+                  GestureDetector(
+                    onTap: () => voiceService.toggleVoiceMode(),
+                    child: AnimatedContainer(
+                      duration: const Duration(milliseconds: 200),
+                      padding: const EdgeInsets.symmetric(
+                        horizontal: 24,
+                        vertical: 12,
+                      ),
+                      decoration: BoxDecoration(
+                        color: state.isVoiceMode
+                            ? Colors.redAccent
+                            : Colors.white10,
+                        borderRadius: BorderRadius.circular(30),
+                        border: Border.all(
+                          color: state.isVoiceMode
+                              ? Colors.redAccent
+                              : Colors.white24,
+                          width: 2,
+                        ),
+                      ),
+                      child: Row(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          Icon(
+                            state.isVoiceMode ? Icons.mic : Icons.mic_none,
+                            color: Colors.white,
+                            size: 20,
+                          ),
+                          const SizedBox(width: 8),
+                          Text(
+                            state.isVoiceMode ? 'VOICE ON' : 'VOICE OFF',
+                            style: const TextStyle(
+                              color: Colors.white,
+                              fontWeight: FontWeight.bold,
+                              letterSpacing: 1.2,
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                  ),
+
+                  // last recognized word
+                  if (state.lastWord.isNotEmpty) ...[
+                    const SizedBox(height: 8),
+                    Text(
+                      '"${state.lastWord}"',
+                      style: const TextStyle(
+                        color: Colors.white38,
+                        fontSize: 12,
+                        fontStyle: FontStyle.italic,
+                      ),
+                    ),
+                  ],
+                  const SizedBox(height: 24),
+                ],
+
+                // CONTROL PAD — hidden when voice mode active
+                if (!state.isVoiceMode) ...[
+                  ControlPad(bleService: bleService),
+                  const SizedBox(height: 32),
+                ],
 
                 // SPEED SLIDER
                 SpeedSlider(bleService: bleService),
@@ -132,7 +221,7 @@ class HomeScreen extends StatelessWidget {
                     onChanged: (val) => state.setTurnSlow(val.toInt()),
                   ),
 
-                  // DRIFT CORRECTION
+                  // DRIFT LEFT
                   Row(
                     mainAxisAlignment: MainAxisAlignment.spaceBetween,
                     children: [
@@ -168,6 +257,7 @@ class HomeScreen extends StatelessWidget {
                     onChanged: (val) => state.setSpeedLeft(val.toInt()),
                   ),
 
+                  // DRIFT RIGHT
                   Row(
                     mainAxisAlignment: MainAxisAlignment.spaceBetween,
                     children: [
