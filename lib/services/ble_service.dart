@@ -36,7 +36,7 @@ class BleService {
 
   Future<void> _connect(BluetoothDevice device) async {
     _device = device;
-    // await device.connect(autoConnect: false);
+    await device.connect(autoConnect: false, license: License.free);
 
     device.connectionState.listen((state) {
       if (state == BluetoothConnectionState.disconnected) {
