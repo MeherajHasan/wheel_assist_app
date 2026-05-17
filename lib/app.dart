@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import 'package:wheel_assist/models/car_state.dart';
+import 'package:wheel_assist/services/auto_stop_service.dart';
 import 'package:wheel_assist/services/ble_service.dart';
 import 'package:wheel_assist/services/voice_service.dart';
 import 'package:wheel_assist/screens/home_screen.dart';
@@ -25,21 +26,27 @@ class _AppRoot extends StatefulWidget {
 }
 
 class _AppRootState extends State<_AppRoot> {
-  late BleService   _bleService;
+  late BleService _bleService;
   late VoiceService _voiceService;
+  late AutoStopService _autoStopService;
 
   @override
   void initState() {
     super.initState();
-    final carState    = context.read<CarState>();
-    _bleService       = BleService(carState);
-    _voiceService     = VoiceService(carState, _bleService);
+    final carState = context.read<CarState>();
+    _bleService = BleService(carState);
+    _voiceService = VoiceService(carState, _bleService);
+    _autoStopService = AutoStopService(
+      carState: carState,
+      bleService: _bleService,
+    );
   }
 
   @override
   void dispose() {
     _bleService.disconnect();
     _voiceService.dispose();
+    _autoStopService.dispose();
     super.dispose();
   }
 
@@ -55,10 +62,7 @@ class _AppRootState extends State<_AppRoot> {
         ),
         useMaterial3: true,
       ),
-      home: HomeScreen(
-        bleService:   _bleService,
-        voiceService: _voiceService,
-      ),
+      home: HomeScreen(bleService: _bleService, voiceService: _voiceService, autoStopService: _autoStopService,),
     );
   }
 }

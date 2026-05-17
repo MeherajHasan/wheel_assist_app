@@ -31,6 +31,26 @@ class CarState extends ChangeNotifier {
 
   String cameraIp = '';
 
+  // auto stop
+  bool isAutoStop = false;
+  bool isStopped = false;
+  List<dynamic> detectionBoxes = [];
+
+  void setAutoStop(bool val) {
+    isAutoStop = val;
+    notifyListeners();
+  }
+
+  void setIsStopped(bool val) {
+    isStopped = val;
+    notifyListeners();
+  }
+
+  void setDetectionBoxes(List<dynamic> val) {
+    detectionBoxes = val;
+    notifyListeners();
+  }
+
   void setCameraIp(String val) {
     cameraIp = val;
     notifyListeners();

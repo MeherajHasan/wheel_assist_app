@@ -3,6 +3,7 @@ import 'package:provider/provider.dart';
 import 'package:wheel_assist/models/car_state.dart';
 import 'package:wheel_assist/screens/about_screen.dart';
 import 'package:wheel_assist/screens/camera_screen.dart';
+import 'package:wheel_assist/services/auto_stop_service.dart';
 import 'package:wheel_assist/services/ble_service.dart';
 import 'package:wheel_assist/services/toast_service.dart';
 import 'package:wheel_assist/services/voice_service.dart';
@@ -14,11 +15,13 @@ import 'package:wheel_assist/widgets/control_pad.dart';
 class HomeScreen extends StatefulWidget {
   final BleService bleService;
   final VoiceService voiceService;
+  final AutoStopService autoStopService;
 
   const HomeScreen({
     super.key,
     required this.bleService,
     required this.voiceService,
+    required this.autoStopService,
   });
 
   @override
@@ -127,29 +130,50 @@ class _HomeScreenState extends State<HomeScreen> {
               children: [
                 // CAMERA BUTTON
                 if (isConnected) ...[
-                  ElevatedButton.icon(
-                    onPressed: () {
-                      if (cameraIp.isEmpty) {
-                        // show IP input dialog
-                        _showIpDialog(context, state);
-                      } else {
-                        Navigator.push(
-                          context,
-                          MaterialPageRoute(
-                            builder: (_) => CameraScreen(
-                              bleService: widget.bleService,
-                              cameraIp: cameraIp,
+                  Row(
+                    children: [
+                      ElevatedButton.icon(
+                        onPressed: () {
+                          if (cameraIp.isEmpty) {
+                            _showIpDialog(context, state);
+                          } else {
+                            Navigator.push(
+                              context,
+                              MaterialPageRoute(
+                                builder: (_) => CameraScreen(
+                                  autoStopService: widget.autoStopService,
+                                  cameraIp: cameraIp,
+                                ),
+                              ),
+                            );
+                          }
+                        },
+                        icon: const Icon(Icons.videocam),
+                        label: const Text('CAMERA'),
+                        style: ElevatedButton.styleFrom(
+                          backgroundColor: Colors.deepOrange,
+                          foregroundColor: Colors.white,
+                        ),
+                      ),
+                      const SizedBox(width: 12),
+                      // auto stop toggle
+                      Row(
+                        children: [
+                          const Text(
+                            'AUTO STOP',
+                            style: TextStyle(
+                              color: Colors.white54,
+                              fontSize: 12,
                             ),
                           ),
-                        );
-                      }
-                    },
-                    icon: const Icon(Icons.videocam),
-                    label: const Text('CAMERA'),
-                    style: ElevatedButton.styleFrom(
-                      backgroundColor: Colors.deepOrange,
-                      foregroundColor: Colors.white,
-                    ),
+                          Switch(
+                            value: context.select((CarState s) => s.isAutoStop),
+                            activeColor: Colors.redAccent,
+                            onChanged: (val) => state.setAutoStop(val),
+                          ),
+                        ],
+                      ),
+                    ],
                   ),
                   const SizedBox(height: 16),
                 ],
@@ -385,16 +409,19 @@ class _HomeScreenState extends State<HomeScreen> {
               style: TextStyle(color: Colors.white54),
             ),
           ),
+
           TextButton(
-            onPressed: () {
-              state.setCameraIp(controller.text.trim());
+            onPressed: () async {
+              final ip = controller.text.trim();
+              state.setCameraIp(ip);
               Navigator.pop(context);
+              await widget.autoStopService.start(ip);
               Navigator.push(
                 context,
                 MaterialPageRoute(
                   builder: (_) => CameraScreen(
-                    bleService: widget.bleService,
-                    cameraIp: controller.text.trim(),
+                    autoStopService: widget.autoStopService,
+                    cameraIp: ip,
                   ),
                 ),
               );
