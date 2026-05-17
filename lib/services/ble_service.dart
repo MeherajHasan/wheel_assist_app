@@ -1,9 +1,9 @@
 import 'dart:async';
 import 'dart:convert';
-import 'package:flutter/material.dart';
 import 'package:flutter_blue_plus/flutter_blue_plus.dart';
 import 'package:wheel_assist/constants/ble_constants.dart';
 import 'package:wheel_assist/models/car_state.dart';
+import 'package:wheel_assist/services/toast_service.dart';
 
 class BleService {
   final CarState carState;

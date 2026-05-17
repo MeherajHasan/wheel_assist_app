@@ -1,7 +1,9 @@
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import 'package:wheel_assist/models/car_state.dart';
+import 'package:wheel_assist/screens/about_screen.dart';
 import 'package:wheel_assist/services/ble_service.dart';
+import 'package:wheel_assist/services/toast_service.dart';
 import 'package:wheel_assist/services/voice_service.dart';
 import 'package:wheel_assist/widgets/status_bar.dart';
 import 'package:wheel_assist/widgets/mode_toggle.dart';
@@ -36,6 +38,13 @@ class HomeScreen extends StatelessWidget {
           ),
         ),
         actions: [
+          IconButton(
+            icon: const Icon(Icons.people_outline, color: Colors.white70),
+            onPressed: () => Navigator.push(
+              context,
+              MaterialPageRoute(builder: (_) => const AboutScreen()),
+            ),
+          ),
           Padding(
             padding: const EdgeInsets.only(right: 16),
             child: state.isScanning || state.isConnecting
@@ -63,8 +72,10 @@ class HomeScreen extends StatelessWidget {
                     onPressed: () async {
                       if (state.isConnected) {
                         await bleService.disconnect();
+                        ToastService.show(context, title: "Disconnecting");
                       } else {
                         await bleService.startScan();
+                        ToastService.show(context, title: "Scanning");
                       }
                     },
                     icon: Icon(
