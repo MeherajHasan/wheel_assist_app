@@ -29,6 +29,13 @@ class CarState extends ChangeNotifier {
   bool isVoiceMode = false;
   String lastWord = '';
 
+  String cameraIp = '';
+
+  void setCameraIp(String val) {
+    cameraIp = val;
+    notifyListeners();
+  }
+
   void setVoiceMode(bool val) {
     isVoiceMode = val;
     notifyListeners();

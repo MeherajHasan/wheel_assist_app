@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import 'package:wheel_assist/models/car_state.dart';
 import 'package:wheel_assist/screens/about_screen.dart';
+import 'package:wheel_assist/screens/camera_screen.dart';
 import 'package:wheel_assist/services/ble_service.dart';
 import 'package:wheel_assist/services/toast_service.dart';
 import 'package:wheel_assist/services/voice_service.dart';
@@ -10,7 +11,7 @@ import 'package:wheel_assist/widgets/mode_toggle.dart';
 import 'package:wheel_assist/widgets/speed_slider.dart';
 import 'package:wheel_assist/widgets/control_pad.dart';
 
-class HomeScreen extends StatelessWidget {
+class HomeScreen extends StatefulWidget {
   final BleService bleService;
   final VoiceService voiceService;
 
@@ -20,6 +21,11 @@ class HomeScreen extends StatelessWidget {
     required this.voiceService,
   });
 
+  @override
+  State<HomeScreen> createState() => _HomeScreenState();
+}
+
+class _HomeScreenState extends State<HomeScreen> {
   @override
   Widget build(BuildContext context) {
     final state = context.watch<CarState>();
@@ -71,10 +77,12 @@ class HomeScreen extends StatelessWidget {
                 : TextButton.icon(
                     onPressed: () async {
                       if (state.isConnected) {
-                        await bleService.disconnect();
+                        await widget.bleService.disconnect();
                         ToastService.show(context, title: "Disconnecting");
                       } else {
-                        final started = await bleService.startScan(context);
+                        final started = await widget.bleService.startScan(
+                          context,
+                        );
                         if (started) {
                           ToastService.show(context, title: "Scanning");
                         }
@@ -107,18 +115,46 @@ class HomeScreen extends StatelessWidget {
             padding: const EdgeInsets.all(20),
             child: Column(
               children: [
+                // CAMERA BUTTON
+                if (state.isConnected) ...[
+                  ElevatedButton.icon(
+                    onPressed: () {
+                      if (state.cameraIp.isEmpty) {
+                        // show IP input dialog
+                        _showIpDialog(context, state);
+                      } else {
+                        Navigator.push(
+                          context,
+                          MaterialPageRoute(
+                            builder: (_) => CameraScreen(
+                              bleService: widget.bleService,
+                              cameraIp: state.cameraIp,
+                            ),
+                          ),
+                        );
+                      }
+                    },
+                    icon: const Icon(Icons.videocam),
+                    label: const Text('CAMERA'),
+                    style: ElevatedButton.styleFrom(
+                      backgroundColor: Colors.deepOrange,
+                      foregroundColor: Colors.white,
+                    ),
+                  ),
+                  const SizedBox(height: 16),
+                ],
                 // STATUS BAR
                 const StatusBar(),
                 const SizedBox(height: 24),
 
                 // MODE TOGGLE
-                ModeToggle(bleService: bleService),
+                ModeToggle(bleService: widget.bleService),
                 const SizedBox(height: 24),
 
                 // VOICE MODE — only in app mode
                 if (state.isConnected && state.mode == 1) ...[
                   GestureDetector(
-                    onTap: () => voiceService.toggleVoiceMode(),
+                    onTap: () => widget.voiceService.toggleVoiceMode(),
                     child: AnimatedContainer(
                       duration: const Duration(milliseconds: 200),
                       padding: const EdgeInsets.symmetric(
@@ -176,12 +212,12 @@ class HomeScreen extends StatelessWidget {
 
                 // CONTROL PAD — hidden when voice mode active
                 if (!state.isVoiceMode) ...[
-                  ControlPad(bleService: bleService),
+                  ControlPad(bleService: widget.bleService),
                   const SizedBox(height: 32),
                 ],
 
                 // SPEED SLIDER
-                SpeedSlider(bleService: bleService),
+                SpeedSlider(bleService: widget.bleService),
                 const SizedBox(height: 24),
 
                 // TUNING SECTION
@@ -224,7 +260,7 @@ class HomeScreen extends StatelessWidget {
                     inactiveColor: Colors.white12,
                     onChangeEnd: (val) async {
                       state.setTurnSlow(val.toInt());
-                      await bleService.sendCommand(
+                      await widget.bleService.sendCommand(
                         mode: state.mode,
                         cmd: state.currentCommand,
                         speed: state.speed,
@@ -260,7 +296,7 @@ class HomeScreen extends StatelessWidget {
                     inactiveColor: Colors.white12,
                     onChangeEnd: (val) async {
                       state.setSpeedLeft(val.toInt());
-                      await bleService.sendCommand(
+                      await widget.bleService.sendCommand(
                         mode: state.mode,
                         cmd: state.currentCommand,
                         speed: state.speed,
@@ -296,7 +332,7 @@ class HomeScreen extends StatelessWidget {
                     inactiveColor: Colors.white12,
                     onChangeEnd: (val) async {
                       state.setSpeedRight(val.toInt());
-                      await bleService.sendCommand(
+                      await widget.bleService.sendCommand(
                         mode: state.mode,
                         cmd: state.currentCommand,
                         speed: state.speed,
@@ -310,6 +346,57 @@ class HomeScreen extends StatelessWidget {
             ),
           ),
         ),
+      ),
+    );
+  }
+
+  void _showIpDialog(BuildContext context, CarState state) {
+    final controller = TextEditingController();
+    showDialog(
+      context: context,
+      builder: (_) => AlertDialog(
+        backgroundColor: const Color(0xFF1E1E1E),
+        title: const Text('Camera IP', style: TextStyle(color: Colors.white)),
+        content: TextField(
+          controller: controller,
+          style: const TextStyle(color: Colors.white),
+          decoration: const InputDecoration(
+            hintText: '192.168.1.100',
+            hintStyle: TextStyle(color: Colors.white38),
+            enabledBorder: UnderlineInputBorder(
+              borderSide: BorderSide(color: Colors.white24),
+            ),
+          ),
+          keyboardType: TextInputType.number,
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context),
+            child: const Text(
+              'CANCEL',
+              style: TextStyle(color: Colors.white54),
+            ),
+          ),
+          TextButton(
+            onPressed: () {
+              state.setCameraIp(controller.text.trim());
+              Navigator.pop(context);
+              Navigator.push(
+                context,
+                MaterialPageRoute(
+                  builder: (_) => CameraScreen(
+                    bleService: widget.bleService,
+                    cameraIp: controller.text.trim(),
+                  ),
+                ),
+              );
+            },
+            child: const Text(
+              'CONNECT',
+              style: TextStyle(color: Colors.deepOrange),
+            ),
+          ),
+        ],
       ),
     );
   }
