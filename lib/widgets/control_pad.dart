@@ -13,44 +13,40 @@ class ControlPad extends StatelessWidget {
     if (!state.isConnected || state.mode != BleConstants.modeApp) return;
     state.setCommand(cmd);
     await bleService.sendCommand(
-      mode:  state.mode,
-      cmd:   cmd,
+      mode: state.mode,
+      cmd: cmd,
       speed: state.speed,
     );
   }
 
   Widget _button({
     required CarState state,
+    required bool isActive,
     required int cmd,
     required IconData icon,
     required String label,
   }) {
-    final isActive = state.currentCommand == cmd;
-
     return GestureDetector(
       onTapDown: (_) => _send(state, cmd),
-      onTapUp:   (_) => _send(state, BleConstants.cmdStop),
+      onTapUp: (_) => _send(state, BleConstants.cmdStop),
       onTapCancel: () => _send(state, BleConstants.cmdStop),
       child: AnimatedContainer(
         duration: const Duration(milliseconds: 100),
-        width:  80,
+        width: 80,
         height: 80,
         decoration: BoxDecoration(
-          color: isActive
-              ? Colors.deepOrange
-              : Colors.white10,
+          color: isActive ? Colors.deepOrange : Colors.white10,
           borderRadius: BorderRadius.circular(16),
           border: Border.all(
-            color: isActive
-                ? Colors.deepOrange
-                : Colors.white24,
+            color: isActive ? Colors.deepOrange : Colors.white24,
             width: 2,
           ),
         ),
         child: Column(
           mainAxisAlignment: MainAxisAlignment.center,
           children: [
-            Icon(icon,
+            Icon(
+              icon,
               color: isActive ? Colors.white : Colors.white60,
               size: 28,
             ),
@@ -72,9 +68,12 @@ class ControlPad extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final state = context.watch<CarState>();
+    final state = context.read<CarState>();
+    final isConnected = context.select((CarState s) => s.isConnected);
+    final mode = context.select((CarState s) => s.mode);
+    final currentCommand = context.select((CarState s) => s.currentCommand);
 
-    final disabled = !state.isConnected || state.mode != BleConstants.modeApp;
+    final disabled = !isConnected || mode != BleConstants.modeApp;
 
     return Opacity(
       opacity: disabled ? 0.3 : 1.0,
@@ -83,8 +82,9 @@ class ControlPad extends StatelessWidget {
           // FORWARD
           _button(
             state: state,
-            cmd:   BleConstants.cmdForward,
-            icon:  Icons.arrow_upward,
+            isActive: currentCommand == BleConstants.cmdForward,
+            cmd: BleConstants.cmdForward,
+            icon: Icons.arrow_upward,
             label: 'FWD',
           ),
           const SizedBox(height: 12),
@@ -95,8 +95,9 @@ class ControlPad extends StatelessWidget {
             children: [
               _button(
                 state: state,
-                cmd:   BleConstants.cmdLeft,
-                icon:  Icons.arrow_back,
+                isActive: currentCommand == BleConstants.cmdLeft,
+                cmd: BleConstants.cmdLeft,
+                icon: Icons.arrow_back,
                 label: 'LEFT',
               ),
               const SizedBox(width: 12),
@@ -106,17 +107,14 @@ class ControlPad extends StatelessWidget {
                 onTap: () => _send(state, BleConstants.cmdStop),
                 child: AnimatedContainer(
                   duration: const Duration(milliseconds: 100),
-                  width:  80,
+                  width: 80,
                   height: 80,
                   decoration: BoxDecoration(
-                    color: state.currentCommand == BleConstants.cmdStop
+                    color: currentCommand == BleConstants.cmdStop
                         ? Colors.redAccent
                         : Colors.white10,
                     borderRadius: BorderRadius.circular(16),
-                    border: Border.all(
-                      color: Colors.redAccent,
-                      width: 2,
-                    ),
+                    border: Border.all(color: Colors.redAccent, width: 2),
                   ),
                   child: const Column(
                     mainAxisAlignment: MainAxisAlignment.center,
@@ -140,8 +138,9 @@ class ControlPad extends StatelessWidget {
               const SizedBox(width: 12),
               _button(
                 state: state,
-                cmd:   BleConstants.cmdRight,
-                icon:  Icons.arrow_forward,
+                isActive: currentCommand == BleConstants.cmdRight,
+                cmd: BleConstants.cmdRight,
+                icon: Icons.arrow_forward,
                 label: 'RIGHT',
               ),
             ],
@@ -151,8 +150,9 @@ class ControlPad extends StatelessWidget {
           // BACKWARD
           _button(
             state: state,
-            cmd:   BleConstants.cmdBackward,
-            icon:  Icons.arrow_downward,
+            isActive: currentCommand == BleConstants.cmdBackward,
+            cmd: BleConstants.cmdBackward,
+            icon: Icons.arrow_downward,
             label: 'BWD',
           ),
         ],

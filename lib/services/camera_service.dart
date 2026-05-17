@@ -7,6 +7,9 @@ class CameraService {
   bool _isStreaming = false;
   bool _processingFrame = false;
 
+  http.Client? _client;
+  StreamSubscription<List<int>>? _streamSubscription;
+
   StreamController<Uint8List>? _frameController;
   Stream<Uint8List>? get frameStream => _frameController?.stream;
 
@@ -19,12 +22,12 @@ class CameraService {
 
   void _fetchStream() async {
     try {
-      final client = http.Client();
+      _client = http.Client();
       final request = http.Request('GET', Uri.parse(_streamUrl!));
-      final response = await client.send(request);
+      final response = await _client!.send(request);
       final List<int> buffer = [];
 
-      response.stream.listen(
+      _streamSubscription = response.stream.listen(
         (chunk) {
           if (!_isStreaming) return;
 
@@ -62,14 +65,16 @@ class CameraService {
             _processingFrame = false;
           }
         },
-        onError: (e) {
+        onError: (e) async {
           print('STREAM ERROR: $e');
+          await _cleanupStream();
           if (_isStreaming) {
             Future.delayed(const Duration(seconds: 2), _fetchStream);
           }
         },
-        onDone: () {
+        onDone: () async {
           print('STREAM DONE');
+          await _cleanupStream();
           if (_isStreaming) {
             Future.delayed(const Duration(seconds: 2), _fetchStream);
           }
@@ -77,14 +82,26 @@ class CameraService {
       );
     } catch (e) {
       print('STREAM FETCH ERROR: $e');
+      await _cleanupStream();
       if (_isStreaming) {
         Future.delayed(const Duration(seconds: 2), _fetchStream);
       }
     }
   }
 
+  Future<void> _cleanupStream() async {
+    await _streamSubscription?.cancel();
+    _streamSubscription = null;
+    _client?.close();
+    _client = null;
+  }
+
   Future<void> stopStream() async {
     _isStreaming = false;
+    await _streamSubscription?.cancel();
+    _streamSubscription = null;
+    _client?.close();
+    _client = null;
     await _frameController?.close();
     _frameController = null;
   }

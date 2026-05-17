@@ -11,7 +11,11 @@ class SpeedSlider extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final state = context.watch<CarState>();
+    final state = context.read<CarState>();
+    final isConnected = context.select((CarState s) => s.isConnected);
+    final mode = context.select((CarState s) => s.mode);
+    final speed = context.select((CarState s) => s.speed);
+    final currentCommand = context.select((CarState s) => s.currentCommand);
 
     return Column(
       children: [
@@ -27,7 +31,7 @@ class SpeedSlider extends StatelessWidget {
               ),
             ),
             Text(
-              '${state.speed}',
+              '$speed',
               style: const TextStyle(
                 color: Colors.deepOrange,
                 fontWeight: FontWeight.bold,
@@ -37,22 +41,22 @@ class SpeedSlider extends StatelessWidget {
           ],
         ),
         Slider(
-          value: state.speed.toDouble(),
+          value: speed.toDouble(),
           min: 80,
           max: 255,
           divisions: 35,
           activeColor: Colors.deepOrange,
           inactiveColor: Colors.white12,
-          onChanged: state.isConnected && state.mode == BleConstants.modeApp
+          onChanged: isConnected && mode == BleConstants.modeApp
               ? (val) {
                   state.setSpeed(val.toInt());
                 }
               : null,
-          onChangeEnd: state.isConnected && state.mode == BleConstants.modeApp
+          onChangeEnd: isConnected && mode == BleConstants.modeApp
               ? (val) async {
                   await bleService.sendCommand(
-                    mode: state.mode,
-                    cmd: state.currentCommand,
+                    mode: mode,
+                    cmd: currentCommand,
                     speed: val.toInt(),
                   );
                 }

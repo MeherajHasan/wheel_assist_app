@@ -28,7 +28,19 @@ class HomeScreen extends StatefulWidget {
 class _HomeScreenState extends State<HomeScreen> {
   @override
   Widget build(BuildContext context) {
-    final state = context.watch<CarState>();
+    final state = context.read<CarState>();
+    final isConnected = context.select((CarState s) => s.isConnected);
+    final isScanning = context.select((CarState s) => s.isScanning);
+    final isConnecting = context.select((CarState s) => s.isConnecting);
+    final cameraIp = context.select((CarState s) => s.cameraIp);
+    final isVoiceMode = context.select((CarState s) => s.isVoiceMode);
+    final lastWord = context.select((CarState s) => s.lastWord);
+    final mode = context.select((CarState s) => s.mode);
+    final speed = context.select((CarState s) => s.speed);
+    final turnSlow = context.select((CarState s) => s.turnSlow);
+    final speedLeft = context.select((CarState s) => s.speedLeft);
+    final speedRight = context.select((CarState s) => s.speedRight);
+    final currentCommand = context.select((CarState s) => s.currentCommand);
 
     return Scaffold(
       backgroundColor: const Color(0xFF121212),
@@ -53,7 +65,7 @@ class _HomeScreenState extends State<HomeScreen> {
           ),
           Padding(
             padding: const EdgeInsets.only(right: 16),
-            child: state.isScanning || state.isConnecting
+            child: isScanning || isConnecting
                 ? Row(
                     children: [
                       const SizedBox(
@@ -66,7 +78,7 @@ class _HomeScreenState extends State<HomeScreen> {
                       ),
                       const SizedBox(width: 8),
                       Text(
-                        state.isScanning ? 'Scanning...' : 'Connecting...',
+                        isScanning ? 'Scanning...' : 'Connecting...',
                         style: const TextStyle(
                           color: Colors.deepOrange,
                           fontWeight: FontWeight.bold,
@@ -76,7 +88,7 @@ class _HomeScreenState extends State<HomeScreen> {
                   )
                 : TextButton.icon(
                     onPressed: () async {
-                      if (state.isConnected) {
+                      if (isConnected) {
                         await widget.bleService.disconnect();
                         ToastService.show(context, title: "Disconnecting");
                       } else {
@@ -89,17 +101,15 @@ class _HomeScreenState extends State<HomeScreen> {
                       }
                     },
                     icon: Icon(
-                      state.isConnected
-                          ? Icons.bluetooth_connected
-                          : Icons.bluetooth,
-                      color: state.isConnected
+                      isConnected ? Icons.bluetooth_connected : Icons.bluetooth,
+                      color: isConnected
                           ? Colors.greenAccent
                           : Colors.deepOrange,
                     ),
                     label: Text(
-                      state.isConnected ? 'Disconnect' : 'Connect',
+                      isConnected ? 'Disconnect' : 'Connect',
                       style: TextStyle(
-                        color: state.isConnected
+                        color: isConnected
                             ? Colors.greenAccent
                             : Colors.deepOrange,
                         fontWeight: FontWeight.bold,
@@ -116,10 +126,10 @@ class _HomeScreenState extends State<HomeScreen> {
             child: Column(
               children: [
                 // CAMERA BUTTON
-                if (state.isConnected) ...[
+                if (isConnected) ...[
                   ElevatedButton.icon(
                     onPressed: () {
-                      if (state.cameraIp.isEmpty) {
+                      if (cameraIp.isEmpty) {
                         // show IP input dialog
                         _showIpDialog(context, state);
                       } else {
@@ -128,7 +138,7 @@ class _HomeScreenState extends State<HomeScreen> {
                           MaterialPageRoute(
                             builder: (_) => CameraScreen(
                               bleService: widget.bleService,
-                              cameraIp: state.cameraIp,
+                              cameraIp: cameraIp,
                             ),
                           ),
                         );
@@ -152,7 +162,7 @@ class _HomeScreenState extends State<HomeScreen> {
                 const SizedBox(height: 24),
 
                 // VOICE MODE — only in app mode
-                if (state.isConnected && state.mode == 1) ...[
+                if (isConnected && mode == 1) ...[
                   GestureDetector(
                     onTap: () => widget.voiceService.toggleVoiceMode(),
                     child: AnimatedContainer(
@@ -162,12 +172,10 @@ class _HomeScreenState extends State<HomeScreen> {
                         vertical: 12,
                       ),
                       decoration: BoxDecoration(
-                        color: state.isVoiceMode
-                            ? Colors.redAccent
-                            : Colors.white10,
+                        color: isVoiceMode ? Colors.redAccent : Colors.white10,
                         borderRadius: BorderRadius.circular(30),
                         border: Border.all(
-                          color: state.isVoiceMode
+                          color: isVoiceMode
                               ? Colors.redAccent
                               : Colors.white24,
                           width: 2,
@@ -177,13 +185,13 @@ class _HomeScreenState extends State<HomeScreen> {
                         mainAxisSize: MainAxisSize.min,
                         children: [
                           Icon(
-                            state.isVoiceMode ? Icons.mic : Icons.mic_none,
+                            isVoiceMode ? Icons.mic : Icons.mic_none,
                             color: Colors.white,
                             size: 20,
                           ),
                           const SizedBox(width: 8),
                           Text(
-                            state.isVoiceMode ? 'VOICE ON' : 'VOICE OFF',
+                            isVoiceMode ? 'VOICE ON' : 'VOICE OFF',
                             style: const TextStyle(
                               color: Colors.white,
                               fontWeight: FontWeight.bold,
@@ -196,10 +204,10 @@ class _HomeScreenState extends State<HomeScreen> {
                   ),
 
                   // last recognized word
-                  if (state.lastWord.isNotEmpty) ...[
+                  if (lastWord.isNotEmpty) ...[
                     const SizedBox(height: 8),
                     Text(
-                      '"${state.lastWord}"',
+                      '"$lastWord"',
                       style: const TextStyle(
                         color: Colors.white38,
                         fontSize: 12,
@@ -211,7 +219,7 @@ class _HomeScreenState extends State<HomeScreen> {
                 ],
 
                 // CONTROL PAD — hidden when voice mode active
-                if (!state.isVoiceMode) ...[
+                if (!isVoiceMode) ...[
                   ControlPad(bleService: widget.bleService),
                   const SizedBox(height: 32),
                 ],
@@ -221,7 +229,7 @@ class _HomeScreenState extends State<HomeScreen> {
                 const SizedBox(height: 24),
 
                 // TUNING SECTION
-                if (state.isConnected) ...[
+                if (isConnected) ...[
                   const Divider(color: Colors.white12),
                   const SizedBox(height: 16),
                   const Text(
@@ -243,7 +251,7 @@ class _HomeScreenState extends State<HomeScreen> {
                         style: TextStyle(color: Colors.white54, fontSize: 12),
                       ),
                       Text(
-                        '${state.turnSlow}',
+                        '$turnSlow',
                         style: const TextStyle(
                           color: Colors.deepOrange,
                           fontWeight: FontWeight.bold,
@@ -252,7 +260,7 @@ class _HomeScreenState extends State<HomeScreen> {
                     ],
                   ),
                   Slider(
-                    value: state.turnSlow.toDouble(),
+                    value: turnSlow.toDouble(),
                     min: 0,
                     max: 180,
                     divisions: 36,
@@ -261,9 +269,9 @@ class _HomeScreenState extends State<HomeScreen> {
                     onChangeEnd: (val) async {
                       state.setTurnSlow(val.toInt());
                       await widget.bleService.sendCommand(
-                        mode: state.mode,
-                        cmd: state.currentCommand,
-                        speed: state.speed,
+                        mode: mode,
+                        cmd: currentCommand,
+                        speed: speed,
                         turnSlow: val.toInt(),
                       );
                     },
@@ -279,7 +287,7 @@ class _HomeScreenState extends State<HomeScreen> {
                         style: TextStyle(color: Colors.white54, fontSize: 12),
                       ),
                       Text(
-                        '${state.speedLeft}',
+                        '$speedLeft',
                         style: const TextStyle(
                           color: Colors.deepOrange,
                           fontWeight: FontWeight.bold,
@@ -288,7 +296,7 @@ class _HomeScreenState extends State<HomeScreen> {
                     ],
                   ),
                   Slider(
-                    value: state.speedLeft.toDouble(),
+                    value: speedLeft.toDouble(),
                     min: 150,
                     max: 255,
                     divisions: 21,
@@ -297,9 +305,9 @@ class _HomeScreenState extends State<HomeScreen> {
                     onChangeEnd: (val) async {
                       state.setSpeedLeft(val.toInt());
                       await widget.bleService.sendCommand(
-                        mode: state.mode,
-                        cmd: state.currentCommand,
-                        speed: state.speed,
+                        mode: mode,
+                        cmd: currentCommand,
+                        speed: speed,
                         speedL: val.toInt(),
                       );
                     },
@@ -315,7 +323,7 @@ class _HomeScreenState extends State<HomeScreen> {
                         style: TextStyle(color: Colors.white54, fontSize: 12),
                       ),
                       Text(
-                        '${state.speedRight}',
+                        '$speedRight',
                         style: const TextStyle(
                           color: Colors.deepOrange,
                           fontWeight: FontWeight.bold,
@@ -324,7 +332,7 @@ class _HomeScreenState extends State<HomeScreen> {
                     ],
                   ),
                   Slider(
-                    value: state.speedRight.toDouble(),
+                    value: speedRight.toDouble(),
                     min: 150,
                     max: 255,
                     divisions: 21,
@@ -333,9 +341,9 @@ class _HomeScreenState extends State<HomeScreen> {
                     onChangeEnd: (val) async {
                       state.setSpeedRight(val.toInt());
                       await widget.bleService.sendCommand(
-                        mode: state.mode,
-                        cmd: state.currentCommand,
-                        speed: state.speed,
+                        mode: mode,
+                        cmd: currentCommand,
+                        speed: speed,
                         speedR: val.toInt(),
                       );
                     },

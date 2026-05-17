@@ -22,7 +22,10 @@ class StatusBar extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final state = context.watch<CarState>();
+    final isConnected = context.select((CarState s) => s.isConnected);
+    final currentCommand = context.select((CarState s) => s.currentCommand);
+    final gyroX = context.select((CarState s) => s.gyroX);
+    final gyroY = context.select((CarState s) => s.gyroY);
 
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
@@ -37,21 +40,17 @@ class StatusBar extends StatelessWidget {
           Row(
             children: [
               Icon(
-                state.isConnected
+                isConnected
                     ? Icons.bluetooth_connected
                     : Icons.bluetooth_disabled,
-                color: state.isConnected
-                    ? Colors.greenAccent
-                    : Colors.redAccent,
+                color: isConnected ? Colors.greenAccent : Colors.redAccent,
                 size: 18,
               ),
               const SizedBox(width: 6),
               Text(
-                state.isConnected ? 'Connected' : 'Disconnected',
+                isConnected ? 'Connected' : 'Disconnected',
                 style: TextStyle(
-                  color: state.isConnected
-                      ? Colors.greenAccent
-                      : Colors.redAccent,
+                  color: isConnected ? Colors.greenAccent : Colors.redAccent,
                   fontWeight: FontWeight.bold,
                 ),
               ),
@@ -60,7 +59,7 @@ class StatusBar extends StatelessWidget {
 
           // current command
           Text(
-            _commandName(state.currentCommand),
+            _commandName(currentCommand),
             style: const TextStyle(
               color: Colors.white70,
               fontWeight: FontWeight.bold,
@@ -70,7 +69,7 @@ class StatusBar extends StatelessWidget {
 
           // gyro values
           Text(
-            'X: ${state.gyroX.toStringAsFixed(1)}  Y: ${state.gyroY.toStringAsFixed(1)}',
+            'X: ${gyroX.toStringAsFixed(1)}  Y: ${gyroY.toStringAsFixed(1)}',
             style: const TextStyle(color: Colors.white38, fontSize: 12),
           ),
         ],

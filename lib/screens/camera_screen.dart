@@ -13,11 +13,13 @@ import 'package:wheel_assist/services/detection_service.dart';
 class CameraScreen extends StatefulWidget {
   final BleService bleService;
   final String cameraIp;
+  final int detectionFrameInterval;
 
   const CameraScreen({
     super.key,
     required this.bleService,
     required this.cameraIp,
+    this.detectionFrameInterval = 90,
   });
 
   @override
@@ -28,18 +30,36 @@ class _CameraScreenState extends State<CameraScreen> {
   final CameraService _cameraService = CameraService();
   final DetectionService _detectionService = DetectionService();
 
-  Uint8List? _currentFrame;
-  Uint8List? _lastJpegBytes;
+  final ValueNotifier<Uint8List?> _frameNotifier = ValueNotifier<Uint8List?>(
+    null,
+  );
+  StreamSubscription<Uint8List?>? _frameSubscription;
+  final int _uiFrameIntervalMs = 100;
+  int _lastFrameRenderMs = 0;
+  Uint8List? _pendingDetectionFrame;
+  int _frameCounter = 0;
   List<_DisplayBox> _boxes = [];
   bool _detectionOn = true;
   bool _autoStop = true;
   bool _isStopped = false;
   bool _isProcessing = false;
-  Timer? _detectionTimer;
 
   // isolate helper — decode only for detection
   static img.Image? _decodeFrame(Uint8List bytes) {
     return img.decodeJpg(bytes);
+  }
+
+  Future<void> _processPendingDetectionFrame() async {
+    if (!_detectionOn || _isProcessing || _pendingDetectionFrame == null)
+      return;
+
+    _isProcessing = true;
+    try {
+      final image = await compute(_decodeFrame, _pendingDetectionFrame!);
+      if (image != null) await _runDetection(image);
+    } finally {
+      _isProcessing = false;
+    }
   }
 
   @override
@@ -55,27 +75,19 @@ class _CameraScreenState extends State<CameraScreen> {
     await _cameraService.startStream(widget.cameraIp);
     print('STREAM STARTED');
 
-    // UI — just pass bytes directly, zero decode cost
-    _cameraService.frameStream?.listen((jpegBytes) {
+    // UI — update only the raw frame image, avoid rebuilding the full page.
+    _frameSubscription = _cameraService.frameStream?.listen((jpegBytes) {
       if (!mounted) return;
-      _lastJpegBytes = jpegBytes;
-      setState(() {
-        _currentFrame = jpegBytes;
-      });
-    });
-
-    // detection — separate timer, decodes only when needed
-    _detectionTimer = Timer.periodic(const Duration(milliseconds: 800), (
-      _,
-    ) async {
-      if (!_detectionOn || _isProcessing || _lastJpegBytes == null) return;
-      _isProcessing = true;
-
-      // decode in isolate — never blocks UI
-      final image = await compute(_decodeFrame, _lastJpegBytes!);
-      if (image != null) await _runDetection(image);
-
-      _isProcessing = false;
+      _frameCounter++;
+      final now = DateTime.now().millisecondsSinceEpoch;
+      if (now - _lastFrameRenderMs >= _uiFrameIntervalMs) {
+        _lastFrameRenderMs = now;
+        _frameNotifier.value = jpegBytes;
+      }
+      if (_frameCounter % widget.detectionFrameInterval == 0) {
+        _pendingDetectionFrame = jpegBytes;
+        _processPendingDetectionFrame();
+      }
     });
   }
 
@@ -174,8 +186,11 @@ class _CameraScreenState extends State<CameraScreen> {
       body: Column(
         children: [
           Expanded(
-            child: _currentFrame == null
-                ? const Center(
+            child: ValueListenableBuilder<Uint8List?>(
+              valueListenable: _frameNotifier,
+              builder: (context, frame, _) {
+                if (frame == null) {
+                  return const Center(
                     child: Column(
                       mainAxisAlignment: MainAxisAlignment.center,
                       children: [
@@ -187,61 +202,65 @@ class _CameraScreenState extends State<CameraScreen> {
                         ),
                       ],
                     ),
-                  )
-                : LayoutBuilder(
-                    builder: (context, constraints) {
-                      return Stack(
-                        children: [
-                          SizedBox(
-                            width: constraints.maxWidth,
-                            height: constraints.maxHeight,
-                            child: Image.memory(
-                              _currentFrame!,
-                              fit: BoxFit.contain,
-                              gaplessPlayback: true,
-                            ),
+                  );
+                }
+
+                return LayoutBuilder(
+                  builder: (context, constraints) {
+                    return Stack(
+                      children: [
+                        SizedBox(
+                          width: constraints.maxWidth,
+                          height: constraints.maxHeight,
+                          child: Image.memory(
+                            frame,
+                            fit: BoxFit.contain,
+                            gaplessPlayback: true,
                           ),
-                          CustomPaint(
-                            size: Size(
-                              constraints.maxWidth,
-                              constraints.maxHeight,
-                            ),
-                            painter: _BoxPainter(
-                              boxes: _boxes,
-                              frameWidth: constraints.maxWidth,
-                              frameHeight: constraints.maxHeight,
-                            ),
+                        ),
+                        CustomPaint(
+                          size: Size(
+                            constraints.maxWidth,
+                            constraints.maxHeight,
                           ),
-                          if (_isStopped)
-                            Positioned(
-                              top: 16,
-                              left: 0,
-                              right: 0,
-                              child: Center(
-                                child: Container(
-                                  padding: const EdgeInsets.symmetric(
-                                    horizontal: 20,
-                                    vertical: 8,
-                                  ),
-                                  decoration: BoxDecoration(
-                                    color: Colors.redAccent,
-                                    borderRadius: BorderRadius.circular(20),
-                                  ),
-                                  child: const Text(
-                                    'OBJECT DETECTED — STOPPED',
-                                    style: TextStyle(
-                                      color: Colors.white,
-                                      fontWeight: FontWeight.bold,
-                                      letterSpacing: 1,
-                                    ),
+                          painter: _BoxPainter(
+                            boxes: _boxes,
+                            frameWidth: constraints.maxWidth,
+                            frameHeight: constraints.maxHeight,
+                          ),
+                        ),
+                        if (_isStopped)
+                          Positioned(
+                            top: 16,
+                            left: 0,
+                            right: 0,
+                            child: Center(
+                              child: Container(
+                                padding: const EdgeInsets.symmetric(
+                                  horizontal: 20,
+                                  vertical: 8,
+                                ),
+                                decoration: BoxDecoration(
+                                  color: Colors.redAccent,
+                                  borderRadius: BorderRadius.circular(20),
+                                ),
+                                child: const Text(
+                                  'OBJECT DETECTED — STOPPED',
+                                  style: TextStyle(
+                                    color: Colors.white,
+                                    fontWeight: FontWeight.bold,
+                                    letterSpacing: 1,
                                   ),
                                 ),
                               ),
                             ),
-                        ],
-                      );
-                    },
-                  ),
+                          ),
+                      ],
+                    );
+                  },
+                );
+              },
+            ),
           ),
           Container(
             padding: const EdgeInsets.all(12),
@@ -249,9 +268,21 @@ class _CameraScreenState extends State<CameraScreen> {
             child: Row(
               mainAxisAlignment: MainAxisAlignment.spaceBetween,
               children: [
-                Text(
-                  'Objects: ${_boxes.length}',
-                  style: const TextStyle(color: Colors.white54),
+                Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      'Objects: ${_boxes.length}',
+                      style: const TextStyle(color: Colors.white54),
+                    ),
+                    Text(
+                      'Detect every ${widget.detectionFrameInterval} frames',
+                      style: const TextStyle(
+                        color: Colors.white24,
+                        fontSize: 11,
+                      ),
+                    ),
+                  ],
                 ),
                 Text(
                   _boxes.any((b) => b.shouldStop) ? 'STOP ZONE' : 'CLEAR',
@@ -276,9 +307,10 @@ class _CameraScreenState extends State<CameraScreen> {
 
   @override
   void dispose() {
-    _detectionTimer?.cancel();
+    _frameSubscription?.cancel();
     _cameraService.dispose();
     _detectionService.dispose();
+    _frameNotifier.dispose();
     super.dispose();
   }
 }

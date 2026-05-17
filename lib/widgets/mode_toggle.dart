@@ -11,7 +11,9 @@ class ModeToggle extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final state = context.watch<CarState>();
+    final state = context.read<CarState>();
+    final isConnected = context.select((CarState s) => s.isConnected);
+    final mode = context.select((CarState s) => s.mode);
 
     return Row(
       mainAxisAlignment: MainAxisAlignment.center,
@@ -26,17 +28,17 @@ class ModeToggle extends StatelessWidget {
         ),
         const SizedBox(width: 12),
         Switch(
-          value: state.mode == BleConstants.modeApp,
+          value: mode == BleConstants.modeApp,
           activeColor: Colors.deepOrange,
-          onChanged: state.isConnected
+          onChanged: isConnected
               ? (val) async {
                   final newMode = val
                       ? BleConstants.modeApp
                       : BleConstants.modeGyro;
                   state.setMode(newMode);
                   await bleService.sendCommand(
-                    mode:  newMode,
-                    cmd:   BleConstants.cmdStop,
+                    mode: newMode,
+                    cmd: BleConstants.cmdStop,
                     speed: state.speed,
                   );
                 }
