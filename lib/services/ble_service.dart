@@ -1,9 +1,11 @@
 import 'dart:async';
 import 'dart:convert';
+import 'package:flutter/material.dart';
 import 'package:flutter_blue_plus/flutter_blue_plus.dart';
 import 'package:wheel_assist/constants/ble_constants.dart';
 import 'package:wheel_assist/models/car_state.dart';
 import 'package:wheel_assist/services/toast_service.dart';
+import 'package:toastification/toastification.dart';
 
 class BleService {
   final CarState carState;
@@ -22,24 +24,47 @@ class BleService {
   //////////////////////////////////////////////////
 
   bool _isConnecting = false;
-  Future<void> startScan() async {
+  Future<bool> startScan(BuildContext context) async {
     _isConnecting = false;
 
-    await FlutterBluePlus.startScan(timeout: const Duration(seconds: 10));
+    final adapterState = await FlutterBluePlus.adapterState.first;
+    if (adapterState != BluetoothAdapterState.on) {
+      ToastService.show(
+        context,
+        title: 'Bluetooth is off',
+        description: 'Turn on Bluetooth before connecting to Wheel Assist.',
+        type: ToastificationType.warning,
+      );
+      return false;
+    }
 
-    _scanSub = FlutterBluePlus.scanResults.listen((results) async {
-      for (ScanResult r in results) {
-        print('FOUND: ${r.device.platformName} | ${r.device.remoteId}');
-        if (r.device.platformName == BleConstants.deviceName &&
-            !_isConnecting) {
-          _isConnecting = true;
-          await FlutterBluePlus.stopScan();
-          await _scanSub?.cancel();
-          await _connect(r.device);
-          break;
+    try {
+      await FlutterBluePlus.startScan(timeout: const Duration(seconds: 10));
+
+      _scanSub = FlutterBluePlus.scanResults.listen((results) async {
+        for (ScanResult r in results) {
+          print('FOUND: ${r.device.platformName} | ${r.device.remoteId}');
+          if (r.device.platformName == BleConstants.deviceName &&
+              !_isConnecting) {
+            _isConnecting = true;
+            await FlutterBluePlus.stopScan();
+            await _scanSub?.cancel();
+            await _connect(r.device);
+            break;
+          }
         }
-      }
-    });
+      });
+
+      return true;
+    } catch (e) {
+      ToastService.show(
+        context,
+        title: 'Bluetooth scan failed',
+        description: e.toString(),
+        type: ToastificationType.error,
+      );
+      return false;
+    }
   }
 
   //////////////////////////////////////////////////

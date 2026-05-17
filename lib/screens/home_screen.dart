@@ -74,8 +74,10 @@ class HomeScreen extends StatelessWidget {
                         await bleService.disconnect();
                         ToastService.show(context, title: "Disconnecting");
                       } else {
-                        await bleService.startScan();
-                        ToastService.show(context, title: "Scanning");
+                        final started = await bleService.startScan(context);
+                        if (started) {
+                          ToastService.show(context, title: "Scanning");
+                        }
                       }
                     },
                     icon: Icon(

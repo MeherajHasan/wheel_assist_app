@@ -29,7 +29,7 @@ class ToastService {
       borderSide: BorderSide(color: Colors.white12),
       primaryColor: _accentColor(type),
       borderRadius: BorderRadius.circular(14),
-      alignment: Alignment.topCenter,
+      alignment: Alignment.bottomCenter,
       autoCloseDuration: const Duration(seconds: 3),
       showProgressBar: false,
       margin: const EdgeInsets.symmetric(horizontal: 20, vertical: 12),
