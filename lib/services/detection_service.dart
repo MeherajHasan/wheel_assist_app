@@ -1,13 +1,14 @@
 import 'dart:math';
+import 'dart:typed_data';
 import 'package:flutter/services.dart';
 import 'package:tflite_flutter/tflite_flutter.dart';
 import 'package:image/image.dart' as img;
 
 class DetectionResult {
-  final double x; // center x (0-1)
-  final double y; // center y (0-1)
-  final double width; // (0-1)
-  final double height; // (0-1)
+  final double x;
+  final double y;
+  final double width;
+  final double height;
   final double confidence;
 
   DetectionResult({
@@ -18,26 +19,29 @@ class DetectionResult {
     required this.confidence,
   });
 
-  // box area as fraction of total frame
   double get area => width * height;
 
-  // is box large enough (>15% of frame)
-  bool get isLarge => area > 0.15;
+  bool get isLarge => area > 0.08;
 
-  // is box center in middle 40% of frame
   bool get isCentered => x > 0.30 && x < 0.70 && y > 0.30 && y < 0.70;
 
-  // stop condition C — large AND centered
   bool get shouldStop => isLarge && isCentered;
 }
 
 class DetectionService {
   Interpreter? _interpreter;
+
   bool _isLoaded = false;
 
+  // IMPORTANT CHANGE
   static const int inputSize = 640;
-  static const double confThreshold = 0.5;
+
+  static const double confThreshold = 0.7;
   static const double iouThreshold = 0.45;
+
+  // PREALLOCATED BUFFERS
+  late Float32List _inputBuffer;
+  late Float32List _outputBuffer;
 
   //////////////////////////////////////////////////
   // LOAD MODEL
@@ -48,6 +52,7 @@ class DetectionService {
       print('LOADING MODEL...');
 
       final modelData = await rootBundle.load('assets/best_int8.tflite');
+
       print('ASSET FOUND — size: ${modelData.lengthInBytes} bytes');
 
       final buffer = modelData.buffer.asUint8List(
@@ -55,14 +60,25 @@ class DetectionService {
         modelData.lengthInBytes,
       );
 
-      _interpreter = await Interpreter.fromBuffer(buffer);
+      final options = InterpreterOptions()..threads = 4;
+
+      _interpreter = await Interpreter.fromBuffer(buffer, options: options);
+
       _isLoaded = true;
 
+      _inputBuffer = Float32List(1 * inputSize * inputSize * 3);
+
+      _outputBuffer = Float32List(1 * 5 * 8400);
+
       print('MODEL LOADED');
+
       print('INPUT  shape: ${_interpreter!.getInputTensor(0).shape}');
-      print('INPUT  type:  ${_interpreter!.getInputTensor(0).type}');
+
+      print('INPUT  type: ${_interpreter!.getInputTensor(0).type}');
+
       print('OUTPUT shape: ${_interpreter!.getOutputTensor(0).shape}');
-      print('OUTPUT type:  ${_interpreter!.getOutputTensor(0).type}');
+
+      print('OUTPUT type: ${_interpreter!.getOutputTensor(0).type}');
     } catch (e, stack) {
       print('MODEL LOAD ERROR: $e');
       print('STACK: $stack');
@@ -73,44 +89,45 @@ class DetectionService {
   // PREPROCESS FRAME
   //////////////////////////////////////////////////
 
-  List<List<List<List<double>>>> _preprocess(img.Image image) {
-    // resize to 640x640
-    final resized = img.copyResize(image, width: inputSize, height: inputSize);
-
-    // normalize to 0-1 and reshape to [1, 640, 640, 3]
-    final input = List.generate(
-      1,
-      (_) => List.generate(
-        inputSize,
-        (y) => List.generate(inputSize, (x) {
-          final pixel = resized.getPixel(x, y);
-          return [pixel.r / 255.0, pixel.g / 255.0, pixel.b / 255.0];
-        }),
-      ),
+  Float32List _preprocess(img.Image image) {
+    final resized = img.copyResize(
+      image,
+      width: inputSize,
+      height: inputSize,
+      interpolation: img.Interpolation.nearest,
     );
 
-    return input;
+    int idx = 0;
+
+    for (int y = 0; y < inputSize; y++) {
+      for (int x = 0; x < inputSize; x++) {
+        final pixel = resized.getPixel(x, y);
+
+        _inputBuffer[idx++] = pixel.r / 255.0;
+        _inputBuffer[idx++] = pixel.g / 255.0;
+        _inputBuffer[idx++] = pixel.b / 255.0;
+      }
+    }
+
+    return _inputBuffer;
   }
 
   //////////////////////////////////////////////////
   // PARSE OUTPUT
-  // YOLOv8 output: [1, 5, 8400]
-  // 5 = cx, cy, w, h, confidence
   //////////////////////////////////////////////////
 
-  List<DetectionResult> _parseOutput(List<List<List<double>>> output) {
+  List<DetectionResult> _parseOutput(Float32List output) {
     final List<DetectionResult> results = [];
 
-    final int numBoxes = output[0][0].length; // 8400
-
-    for (int i = 0; i < numBoxes; i++) {
-      final double cx = output[0][0][i];
-      final double cy = output[0][1][i];
-      final double w = output[0][2][i];
-      final double h = output[0][3][i];
-      final double conf = output[0][4][i];
+    for (int i = 0; i < 8400; i++) {
+      final double conf = output[4 * 8400 + i];
 
       if (conf < confThreshold) continue;
+
+      final double cx = output[0 * 8400 + i];
+      final double cy = output[1 * 8400 + i];
+      final double w = output[2 * 8400 + i];
+      final double h = output[3 * 8400 + i];
 
       results.add(
         DetectionResult(
@@ -133,13 +150,13 @@ class DetectionService {
   List<DetectionResult> _nms(List<DetectionResult> boxes) {
     if (boxes.isEmpty) return [];
 
-    // sort by confidence descending
     boxes.sort((a, b) => b.confidence.compareTo(a.confidence));
 
     final List<DetectionResult> kept = [];
 
     while (boxes.isNotEmpty) {
       final best = boxes.removeAt(0);
+
       kept.add(best);
 
       boxes.removeWhere((box) => _iou(best, box) > iouThreshold);
@@ -166,6 +183,7 @@ class DetectionService {
 
     final double interW = max(0, interX2 - interX1);
     final double interH = max(0, interY2 - interY1);
+
     final double interArea = interW * interH;
 
     final double aArea = a.width * a.height;
@@ -179,20 +197,23 @@ class DetectionService {
   //////////////////////////////////////////////////
 
   Future<List<DetectionResult>> detect(img.Image image) async {
-    if (!_isLoaded || _interpreter == null) return [];
+    if (!_isLoaded || _interpreter == null) {
+      return [];
+    }
 
     try {
       final input = _preprocess(image);
-      final output = List.generate(
-        1,
-        (_) => List.generate(5, (_) => List.filled(8400, 0.0)),
-      );
 
-      _interpreter!.run(input, output);
+      final inputBuffer = input.reshape([1, inputSize, inputSize, 3]);
 
-      return _parseOutput(output);
+      final outputBuffer = _outputBuffer.reshape([1, 5, 8400]);
+
+      _interpreter!.run(inputBuffer, outputBuffer);
+
+      return _parseOutput(_outputBuffer);
     } catch (e) {
       print('INFERENCE ERROR: $e');
+
       return [];
     }
   }
