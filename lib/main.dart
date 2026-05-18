@@ -8,4 +8,3 @@ void main() {
   Permission.speech;
   runApp(const App());
 }
-

@@ -4,6 +4,7 @@ import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import 'package:wheel_assist/models/car_state.dart';
 import 'package:wheel_assist/services/auto_stop_service.dart';
+import 'package:wheel_assist/services/detection_isolate.dart';
 
 class CameraScreen extends StatefulWidget {
   final AutoStopService autoStopService;

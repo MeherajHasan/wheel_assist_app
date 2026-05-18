@@ -1,46 +1,11 @@
 import 'dart:async';
 import 'dart:isolate';
-import 'dart:typed_data';
-
-import 'package:image/image.dart' as img;
+import 'package:flutter/services.dart';
 import 'package:wheel_assist/constants/ble_constants.dart';
 import 'package:wheel_assist/models/car_state.dart';
 import 'package:wheel_assist/services/ble_service.dart';
 import 'package:wheel_assist/services/camera_service.dart';
-import 'package:wheel_assist/services/detection_service.dart';
-
-//////////////////////////////////////////////////
-// ISOLATE MESSAGE TYPES
-//////////////////////////////////////////////////
-
-class _DecodeRequest {
-  final Uint8List bytes;
-  final SendPort replyPort;
-
-  _DecodeRequest(this.bytes, this.replyPort);
-}
-
-//////////////////////////////////////////////////
-// JPG DECODE ISOLATE
-//////////////////////////////////////////////////
-
-void _decodeIsolateEntry(SendPort mainSendPort) {
-  final receivePort = ReceivePort();
-
-  mainSendPort.send(receivePort.sendPort);
-
-  receivePort.listen((message) {
-    if (message is _DecodeRequest) {
-      final image = img.decodeJpg(message.bytes);
-
-      message.replyPort.send(image);
-    }
-  });
-}
-
-//////////////////////////////////////////////////
-// AUTO STOP SERVICE
-//////////////////////////////////////////////////
+import 'package:wheel_assist/services/detection_isolate.dart';
 
 class AutoStopService {
   final CarState carState;
@@ -48,70 +13,91 @@ class AutoStopService {
 
   final CameraService _cameraService = CameraService();
 
-  final DetectionService _detectionService = DetectionService();
-
   StreamSubscription<Uint8List>? _frameSub;
 
-  Uint8List? _lastJpegBytes;
-
-  Timer? _detectionTimer;
+  Isolate? _detectionIsolate;
+  SendPort? _detectionSendPort;
 
   bool _isProcessing = false;
   bool _isRunning = false;
+  bool _stopSent = false;
 
-  //////////////////////////////////////////////////
-  // DECODE ISOLATE
-  //////////////////////////////////////////////////
-
-  Isolate? _decodeIsolate;
-
-  SendPort? _decodeSendPort;
-
-  //////////////////////////////////////////////////
-  // PUBLIC STREAM
-  //////////////////////////////////////////////////
+  int _frameCount = 0;
+  static const int _detectEveryNFrames = 30;
 
   Stream<Uint8List>? get frameStream => _cameraService.frameStream;
-
-  //////////////////////////////////////////////////
-  // CONSTRUCTOR
-  //////////////////////////////////////////////////
 
   AutoStopService({required this.carState, required this.bleService});
 
   //////////////////////////////////////////////////
-  // INIT DECODE ISOLATE
+  // INIT DETECTION ISOLATE
   //////////////////////////////////////////////////
 
-  Future<void> _initDecodeIsolate() async {
-    final receivePort = ReceivePort();
-
-    _decodeIsolate = await Isolate.spawn(
-      _decodeIsolateEntry,
-      receivePort.sendPort,
+  Future<void> _initDetectionIsolate() async {
+    // load model bytes on main isolate where rootBundle works
+    final modelData = await rootBundle.load('assets/best_int8_240.tflite');
+    final modelBytes = modelData.buffer.asUint8List(
+      modelData.offsetInBytes,
+      modelData.lengthInBytes,
     );
 
-    _decodeSendPort = await receivePort.first as SendPort;
+    final receivePort = ReceivePort();
+    final token = RootIsolateToken.instance!;
 
-    print('DECODE ISOLATE READY');
+    _detectionIsolate = await Isolate.spawn(
+      detectionIsolateEntry,
+      [receivePort.sendPort, token, modelBytes], // pass bytes too
+    );
+
+    final completer = Completer<SendPort>();
+
+    receivePort.listen((message) {
+      if (message is SendPort) {
+        completer.complete(message);
+      } else if (message == 'MODEL_LOADED') {
+        print('DETECTION ISOLATE READY');
+      } else if (message is String && message.startsWith('MODEL_LOAD_ERROR')) {
+        print(message);
+      }
+    });
+
+    _detectionSendPort = await completer.future;
   }
 
   //////////////////////////////////////////////////
-  // DECODE IMAGE
+  // SEND TO DETECTION ISOLATE
   //////////////////////////////////////////////////
 
-  Future<img.Image?> _decodeInIsolate(Uint8List bytes) async {
-    if (_decodeSendPort == null) {
-      return null;
-    }
+  Future<DetectionResponse> _detect(Uint8List jpegBytes) async {
+    if (_detectionSendPort == null) return DetectionResponse([]);
 
     final replyPort = ReceivePort();
 
-    _decodeSendPort!.send(_DecodeRequest(bytes, replyPort.sendPort));
+    _detectionSendPort!.send({
+      'type': 'detect',
+      'jpegBytes': jpegBytes,
+      'replyPort': replyPort.sendPort,
+    });
 
-    final result = await replyPort.first;
+    final response = await replyPort.first;
+    replyPort.close();
 
-    return result as img.Image?;
+    if (response is Map && response['type'] == 'detections') {
+      final boxes = <DetectionBox>[];
+      final rawBoxes = response['boxes'];
+      if (rawBoxes is List) {
+        for (final rawBox in rawBoxes) {
+          if (rawBox is Map<String, dynamic>) {
+            boxes.add(DetectionBox.fromMap(rawBox));
+          } else if (rawBox is Map) {
+            boxes.add(DetectionBox.fromMap(Map<String, dynamic>.from(rawBox)));
+          }
+        }
+      }
+      return DetectionResponse(boxes);
+    }
+
+    return DetectionResponse([]);
   }
 
   //////////////////////////////////////////////////
@@ -120,169 +106,68 @@ class AutoStopService {
 
   Future<void> start(String ip) async {
     if (_isRunning) return;
-
     _isRunning = true;
 
     carState.setCameraIp(ip);
 
-    //////////////////////////////////////////////////
-    // INIT SERVICES
-    //////////////////////////////////////////////////
-
-    await _initDecodeIsolate();
-
-    await _detectionService.loadModel();
-
+    await _initDetectionIsolate();
     await _cameraService.startStream(ip);
 
-    //////////////////////////////////////////////////
-    // LISTEN CAMERA STREAM
-    //////////////////////////////////////////////////
-
     _frameSub = _cameraService.frameStream?.listen((jpegBytes) {
-      _lastJpegBytes = jpegBytes;
+      _frameCount++;
+
+      // detection every N frames — stream never blocked
+      if (_frameCount % _detectEveryNFrames == 0 && !_isProcessing) {
+        _frameCount = 0;
+        _runDetection(jpegBytes);
+      }
     });
+  }
 
-    //////////////////////////////////////////////////
-    // DETECTION STATE
-    //////////////////////////////////////////////////
+  //////////////////////////////////////////////////
+  // RUN DETECTION
+  //////////////////////////////////////////////////
 
-    bool _stopSent = false;
+  void _runDetection(Uint8List jpegBytes) async {
+    if (!carState.isAutoStop || _isProcessing || _stopSent) return;
 
-    //////////////////////////////////////////////////
-    // DETECTION LOOP
-    //////////////////////////////////////////////////
+    _isProcessing = true;
 
-    void _restartDetectionTimer() {
-      _detectionTimer?.cancel();
+    try {
+      final response = await _detect(jpegBytes);
+      final boxes = response.boxes;
+      final shouldStop = boxes.any((b) => b.shouldStop);
 
-      _detectionTimer = Timer.periodic(const Duration(milliseconds: 250), (
-        _,
-      ) async {
-        //////////////////////////////////////////////////
-        // CHECK CONDITIONS
-        //////////////////////////////////////////////////
+      carState.setDetectionBoxes(boxes);
 
-        if (!carState.isAutoStop) {
-          return;
-        }
+      if (shouldStop && !_stopSent) {
+        _stopSent = true;
+        carState.setIsStopped(true);
 
-        if (_isProcessing) {
-          return;
-        }
+        // fire and forget — highest priority
+        bleService
+            .sendCommand(
+              mode: BleConstants.modeApp,
+              cmd: BleConstants.cmdStop,
+              speed: carState.speed,
+            )
+            .catchError((e) => print('STOP CMD ERROR: $e'));
 
-        if (_lastJpegBytes == null) {
-          return;
-        }
+        print('AUTO STOP — object detected, pausing 3s');
 
-        _isProcessing = true;
-
-        try {
-          //////////////////////////////////////////////////
-          // DECODE IMAGE
-          //////////////////////////////////////////////////
-
-          final image = await _decodeInIsolate(_lastJpegBytes!);
-
-          if (image == null) {
-            return;
-          }
-
-          //////////////////////////////////////////////////
-          // RUN DETECTION
-          //////////////////////////////////////////////////
-
-          final results = await _detectionService.detect(image);
-
-          //////////////////////////////////////////////////
-          // SHOULD STOP
-          //////////////////////////////////////////////////
-
-          final shouldStop = results.any((r) => r.shouldStop);
-
-          //////////////////////////////////////////////////
-          // UPDATE BOXES
-          //////////////////////////////////////////////////
-
-          carState.setDetectionBoxes(
-            results
-                .map(
-                  (r) => DetectionBox(
-                    x: r.x,
-                    y: r.y,
-                    width: r.width,
-                    height: r.height,
-                    confidence: r.confidence,
-                    shouldStop: r.shouldStop,
-                  ),
-                )
-                .toList(),
-          );
-
-          //////////////////////////////////////////////////
-          // SEND STOP
-          //////////////////////////////////////////////////
-
-          if (shouldStop && !_stopSent) {
-            _stopSent = true;
-
-            carState.setIsStopped(true);
-
-            //////////////////////////////////////////////////
-            // PAUSE DETECTION
-            //////////////////////////////////////////////////
-
-            _detectionTimer?.cancel();
-
-            _detectionTimer = null;
-
-            //////////////////////////////////////////////////
-            // SEND BLE STOP
-            //////////////////////////////////////////////////
-
-            bleService
-                .sendCommand(
-                  mode: BleConstants.modeApp,
-                  cmd: BleConstants.cmdStop,
-                  speed: carState.speed,
-                )
-                .catchError((e) => print('STOP CMD ERROR: $e'));
-
-            print('AUTO STOP — pausing detection for 3s');
-
-            //////////////////////////////////////////////////
-            // RESUME AFTER 3S
-            //////////////////////////////////////////////////
-
-            Future.delayed(const Duration(seconds: 3), () {
-              if (!_isRunning) {
-                return;
-              }
-
-              _stopSent = false;
-
-              carState.setIsStopped(false);
-
-              carState.setDetectionBoxes([]);
-
-              print('AUTO STOP — resuming detection');
-
-              _restartDetectionTimer();
-            });
-          }
-        } catch (e) {
-          print('DETECTION ERROR: $e');
-        } finally {
-          _isProcessing = false;
-        }
-      });
+        Future.delayed(const Duration(seconds: 3), () {
+          if (!_isRunning) return;
+          _stopSent = false;
+          carState.setIsStopped(false);
+          carState.setDetectionBoxes([]);
+          print('AUTO STOP — resuming detection');
+        });
+      }
+    } catch (e) {
+      print('DETECTION ERROR: $e');
+    } finally {
+      _isProcessing = false;
     }
-
-    //////////////////////////////////////////////////
-    // START DETECTION
-    //////////////////////////////////////////////////
-
-    _restartDetectionTimer();
   }
 
   //////////////////////////////////////////////////
@@ -292,58 +177,28 @@ class AutoStopService {
   Future<void> stop() async {
     _isRunning = false;
 
-    _detectionTimer?.cancel();
-
-    _detectionTimer = null;
-
     await _frameSub?.cancel();
-
     _frameSub = null;
+
+    _detectionIsolate?.kill(priority: Isolate.immediate);
+    _detectionIsolate = null;
+    _detectionSendPort = null;
 
     await _cameraService.stopStream();
 
-    _decodeIsolate?.kill(priority: Isolate.immediate);
-
-    _decodeIsolate = null;
-
-    _decodeSendPort = null;
-
     carState.setCameraIp('');
-
     carState.setDetectionBoxes([]);
-
     carState.setIsStopped(false);
+    _stopSent = false;
+    _isProcessing = false;
+    _frameCount = 0;
   }
 
   //////////////////////////////////////////////////
   // DISPOSE
   //////////////////////////////////////////////////
 
-  void dispose() {
-    stop();
-
-    _detectionService.dispose();
+  void dispose() async {
+    await stop();
   }
-}
-
-//////////////////////////////////////////////////
-// DETECTION BOX MODEL
-//////////////////////////////////////////////////
-
-class DetectionBox {
-  final double x;
-  final double y;
-  final double width;
-  final double height;
-  final double confidence;
-  final bool shouldStop;
-
-  DetectionBox({
-    required this.x,
-    required this.y,
-    required this.width,
-    required this.height,
-    required this.confidence,
-    required this.shouldStop,
-  });
 }
